@@ -1,12 +1,13 @@
 from langchain_ollama import ChatOllama
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import MemorySaver
 from utils import stt, execute_command 
 from dotenv import load_dotenv
-import prompt
+from prompt import prompt
 import getpass
 import os
 
@@ -18,7 +19,7 @@ if "GOOGLE_API_KEY" not in os.environ:
 memory = MemorySaver()
 config = {"configurable": {"thread_id": "1"}}
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-lite") # Replace with your chosen model
+llm = ChatGroq(model="llama-3.3-70b-versatile") # Replace with your chosen model
 search = DuckDuckGoSearchResults(description="""A web search tool for getting all kind of infromation on the internet. 
                                     You can use it get current events information and search for something you don't know.""")
 
@@ -37,7 +38,7 @@ def print_stream(stream):
 
 tools = [search, execute_command, gui_interaction]
 
-graph = create_react_agent(llm, tools=tools, prompt=prompt, checkpointer=memory, debug=False)
+graph = create_agent(llm, tools=tools, system_prompt=prompt, checkpointer=memory, debug=False)
 
 if __name__ == "__main__":
     while True:
