@@ -1,89 +1,48 @@
-import whisper
-import pyaudio
-import webrtcvad
-import numpy as np
-import torch
+import subprocess
+import sounddevice as sd
+import wavio
+import os
 
-# Load Whisper model and send it to GPU
-#model = whisper.load_model("base").to("cuda")
+# Recording settings
+DURATION = 5  # seconds
+FS = 16000    # sample rate
+MAX_SILENCE_SECONDS = 0.8
 
-import torch
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = whisper.load_model("base").to(device)
-
-
-# Audio config
-RATE = 16000
-CHUNK = 1024
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-VAD_MODE = 3
-
-vad = webrtcvad.Vad(VAD_MODE)
-
-def is_speech(frame, rate):
-    return vad.is_speech(frame, rate)
-
-def is_loud_enough(frame, threshold=500):
-    audio = np.frombuffer(frame, dtype=np.int16)
-    return np.abs(audio).mean() > threshold
+# Paths
+WHISPER_CLI_PATH = "/home/zeek/Projects/linux-assistant_3/whisper-cli"
+MODEL_PATH = "/home/zeek/Projects/linux-assistant_3/ggml-base.en.bin"
+AUDIO_FILE = "audio.wav"
 
 def record_audio():
-    p = pyaudio.PyAudio()
-    stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+    print(f"🎙️ Recording for {DURATION} seconds...")
+    recording = sd.rec(int(DURATION * FS), samplerate=FS, channels=1)
+    sd.wait()
+    wavio.write(AUDIO_FILE, recording, FS, sampwidth=2)
+    return AUDIO_FILE
 
-    frames = []
-    silence_count = 0
-    max_silence_frames = 50  # Adjust as needed
-
-    frame_duration_ms = 20
-    frame_bytes = int(RATE * (frame_duration_ms / 1000.0) * 2)  # 2 bytes per sample (16-bit audio)
-
-    buffer = b''
-
-    while True:
-        data = stream.read(CHUNK)
-        buffer += data
-
-        while len(buffer) >= frame_bytes:
-            frame = buffer[:frame_bytes]
-            buffer = buffer[frame_bytes:]
-
-            frames.append(frame)
-
-            if is_loud_enough(frame) and is_speech(frame, RATE):
-                silence_count = 0
-            else:
-                silence_count += 1
-
-            if silence_count > max_silence_frames:
-                print("Speech ended.")
-                stream.stop_stream()
-                stream.close()
-                p.terminate()
-
-                audio_data = b''.join(frames)
-                audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-                return audio_np
-
-def transcribe_audio(audio_np):
-    audio_tensor = torch.from_numpy(audio_np).to("cuda")
-    audio_tensor = whisper.pad_or_trim(audio_tensor)
-    mel = whisper.log_mel_spectrogram(audio_tensor).to("cuda")
-    options = whisper.DecodingOptions(fp16=True)
-    result = whisper.decode(model, mel, options)
-    return result.text
+def transcribe_audio(file_path):
+    try:
+        result = subprocess.run(
+            [WHISPER_CLI_PATH, file_path, "--model", MODEL_PATH, "--language", "en"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print("Error running whisper-cli:\n", result.stderr)
+            return None
+        return result.stdout
+    except FileNotFoundError:
+        print(f"whisper-cli not found at {WHISPER_CLI_PATH}")
+        return None
 
 def stt():
-    audio = record_audio()
-    if(audio.shape[0] < 5000): return ""
-    return transcribe_audio(audio)
+    audio_file = record_audio()
+    text = transcribe_audio(audio_file)
+    if text:
+        print("Transcribed text:\n", text)
+    else:
+        print("No text was transcribed.")
+    return text
 
 if __name__ == "__main__":
-    # while True:
-    audio = record_audio()
-    print(audio.shape)
-    text = transcribe_audio(audio)
-    print("You said:", text)
-
+    stt()

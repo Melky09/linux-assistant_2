@@ -1,33 +1,60 @@
-from langchain_ollama import ChatOllama
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_core.tools import tool
 from langchain.agents import create_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import MemorySaver
-from utils import stt, execute_command 
+
+from utils import execute_command
+from utils.speech_to_text import stt
+
 from dotenv import load_dotenv
 from prompt import prompt
 import getpass
 import os
 
+# --------------------------------------------------
+# ENV SETUP
+# --------------------------------------------------
 load_dotenv()
 
 if "GOOGLE_API_KEY" not in os.environ:
-    os.environ["GOOGLE_API_KEY"] = getpass.getpass("Enter your Google AI API key: ")
+    os.environ["GOOGLE_API_KEY"] = getpass.getpass(
+        "Enter your Google AI API key: "
+    )
 
-memory = MemorySaver()
-config = {"configurable": {"thread_id": "1"}}
+# --------------------------------------------------
+# LLM + TOOLS
+# --------------------------------------------------
+llm = ChatGroq(model="llama-3.3-70b-versatile")
 
-llm = ChatGroq(model="llama-3.3-70b-versatile") # Replace with your chosen model
-search = DuckDuckGoSearchResults(description="""A web search tool for getting all kind of infromation on the internet. 
-                                    You can use it get current events information and search for something you don't know.""")
+search = DuckDuckGoSearchResults(
+    description="Search the internet for real-time information."
+)
 
 @tool
 def gui_interaction(coordinates: str) -> str:
-    """Performs a certain gui action given the coordinates to a button on screen but is slow """
-    return f"Comand failed"
+    """Performs a GUI action (currently not implemented)."""
+    return "Command failed"
 
+tools = [search, execute_command, gui_interaction]
+
+# --------------------------------------------------
+# AGENT
+# --------------------------------------------------
+memory = MemorySaver()
+config = {"configurable": {"thread_id": "1"}}
+
+graph = create_agent(
+    llm,
+    tools=tools,
+    system_prompt=prompt,
+    checkpointer=memory,
+    debug=False,
+)
+
+# --------------------------------------------------
+# HELPERS
+# --------------------------------------------------
 def print_stream(stream):
     for s in stream:
         message = s["messages"][-1]
@@ -36,17 +63,43 @@ def print_stream(stream):
         else:
             message.pretty_print()
 
-tools = [search, execute_command, gui_interaction]
 
-graph = create_agent(llm, tools=tools, system_prompt=prompt, checkpointer=memory, debug=False)
+def get_user_input():
+    """
+    Choose input mode:
+    - Enter → text
+    - v     → voice
+    - q     → quit
+    """
+    mode = input("\n[Enter]=Text | v=Voice | q=Quit : ").strip().lower()
 
+    if mode == "q":
+        return None
+
+    if mode == "v":
+        print("🎙️ Listening...")
+        text = stt()
+        print(f"📝 You said: {text}")
+        return text
+
+    return input("You: ").strip()
+
+
+# --------------------------------------------------
+# MAIN LOOP
+# --------------------------------------------------
 if __name__ == "__main__":
     while True:
-        req = input("You: ")
-        if(req == "a"): 
-            req = stt()
-            if(input(req + " ") == 'n'): continue
-        if(req == "q"): break
-        if(req == ""): continue
-        inputs = {"messages": [("user", req)]}
-        print_stream(graph.stream(inputs, config=config, stream_mode="values"))
+        user_text = get_user_input()
+
+        if user_text is None:
+            print("👋 Exiting assistant")
+            break
+
+        if not user_text:
+            continue
+
+        inputs = {"messages": [("user", user_text)]}
+        print_stream(
+            graph.stream(inputs, config=config, stream_mode="values")
+        )
